@@ -1,4 +1,5 @@
 import type { LookupFunction } from "node:net";
+import type { ResourceType } from "./html.js";
 
 export interface CrawlOptions {
   maxPages?: number;
@@ -12,6 +13,8 @@ export interface CrawlPage {
   statusCode?: number;
   contentType?: string;
   links: string[];
+  internalLinks: string[];
+  resources: Array<{ type: ResourceType; url: string }>;
   error?: string;
 }
 

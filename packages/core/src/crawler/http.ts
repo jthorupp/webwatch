@@ -7,12 +7,20 @@ import type { CrawlerNetworkForTests, HttpResponse, LoadedPage, ResolvedAddress 
 
 const MAX_REDIRECTS = 5;
 
+export class ResponseSizeLimitError extends Error {
+  constructor(readonly statusCode: number, maxResponseBytes: number) {
+    super(`Response exceeded the ${maxResponseBytes} byte limit.`);
+    this.name = "ResponseSizeLimitError";
+  }
+}
+
 export async function loadPage(
   initialUrl: URL,
   origin: string,
   network: CrawlerNetworkForTests,
   timeoutMs: number,
   maxResponseBytes: number,
+  allowCrossOriginRedirects = false,
 ): Promise<LoadedPage> {
   let url = initialUrl;
   const redirectChain = new Set([url.href]);
@@ -27,7 +35,7 @@ export async function loadPage(
     if (redirectCount >= MAX_REDIRECTS) throw new Error(`Too many redirects (maximum ${MAX_REDIRECTS}).`);
 
     const nextUrl = normalizeCrawlUrl(new URL(location, url).href);
-    if (nextUrl.origin !== origin) {
+    if (!allowCrossOriginRedirects && nextUrl.origin !== origin) {
       throw new Error(`Blocked cross-origin redirect to ${nextUrl.origin}.`);
     }
     if (redirectChain.has(nextUrl.href)) throw new Error("Redirect loop detected.");
@@ -71,8 +79,9 @@ function requestOnce(
     }, (response) => {
       const headers = response.headers as Record<string, string | string[] | undefined>;
       if (isRedirect(response.statusCode ?? 0)) {
-        response.resume();
         finish(undefined, { statusCode: response.statusCode ?? 0, headers, body: "" });
+        response.destroy();
+        request.destroy();
         return;
       }
 
@@ -84,7 +93,7 @@ function requestOnce(
         if (size > maxResponseBytes) {
           response.destroy();
           request.destroy();
-          finish(new Error(`Response exceeded the ${maxResponseBytes} byte limit.`));
+          finish(new ResponseSizeLimitError(response.statusCode ?? 0, maxResponseBytes));
           return;
         }
         chunks.push(buffer);
