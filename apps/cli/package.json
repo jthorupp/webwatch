@@ -14,5 +14,8 @@
   },
   "dependencies": {
     "@webwatch/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2"
   }
 }

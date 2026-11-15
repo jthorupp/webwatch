@@ -1,5 +1,59 @@
 #!/usr/bin/env node
 
-import { version } from "@webwatch/core";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { parseCommand, version } from "@webwatch/core";
 
-console.log(`WebWatch ${version}`);
+const helpText = `WebWatch ${version}
+
+Usage:
+  webwatch <command> [options]
+
+Commands:
+  init                 Create a minimal webwatch.config.ts
+  scan <url>           Validate a URL (scanning is not implemented yet)
+
+Options:
+  -h, --help           Show this help
+  -v, --version        Show the version`;
+
+async function main(): Promise<void> {
+  const result = parseCommand(process.argv.slice(2));
+  if ("error" in result) {
+    console.error(result.error);
+    process.exitCode = 1;
+    return;
+  }
+
+  switch (result.command.name) {
+    case "help":
+      console.log(helpText);
+      return;
+    case "version":
+      console.log(`WebWatch ${version}`);
+      return;
+    case "init": {
+      const configPath = join(process.cwd(), "webwatch.config.ts");
+      try {
+        await writeFile(configPath, "export default {};\n", { flag: "wx" });
+        console.log(`Created ${configPath}`);
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+          console.error("webwatch.config.ts already exists; leaving it unchanged.");
+        } else {
+          throw error;
+        }
+        process.exitCode = 1;
+      }
+      return;
+    }
+    case "scan":
+      console.log(`URL is valid: ${result.command.url}`);
+      console.log("Scanning is not implemented yet.");
+  }
+}
+
+void main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});
