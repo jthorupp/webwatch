@@ -137,6 +137,46 @@ test("follows same-origin redirects and removes fragments from the final URL", a
   assert.equal(result.stats.redirectsFollowed, 1);
 });
 
+test("closes long-running redirect response bodies promptly", async (t) => {
+  let markRedirectClosed!: () => void;
+  const redirectClosed = new Promise<void>((resolve) => {
+    markRedirectClosed = resolve;
+  });
+  const requested: string[] = [];
+  const { server, port } = await startServer((request, response) => {
+    requested.push(request.url ?? "/");
+    if (request.url === "/start") {
+      response.writeHead(302, { location: "/destination" });
+      response.write("redirect body chunk");
+      const interval = setInterval(() => response.write("more redirect body"), 10);
+      response.once("close", () => {
+        clearInterval(interval);
+        markRedirectClosed();
+      });
+      return;
+    }
+    response.setHeader("content-type", "text/html");
+    response.end("<p>Destination</p>");
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await closeServer(server);
+  });
+  const { network } = testNetwork();
+
+  const result = await crawlWithNetwork(`http://example.com:${port}/start`, {}, network);
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Redirect response was not closed promptly.")), 500);
+    redirectClosed.then(() => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+  assert.deepEqual(requested, ["/start", "/destination"]);
+  assert.equal(result.pages[0].finalUrl, `http://example.com:${port}/destination`);
+});
+
 test("does not fetch a redirect target a second time when it is already queued", async (t) => {
   const requested: string[] = [];
   const { server, port } = await startServer((request, response) => {

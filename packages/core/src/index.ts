@@ -2,12 +2,15 @@ export const version = "0.1.0";
 
 export { crawl, isPublicIpAddress } from "./crawler.js";
 export type { CrawlOptions, CrawlPage, CrawlResult, CrawlStats } from "./crawler.js";
+export { scan } from "./scan.js";
+export type { ScanOptions, ScanResult } from "./scan.js";
+export type { Finding, FindingEvidence, FindingSeverity, FindingType } from "./finding.js";
 
 export type WebWatchCommand =
   | { name: "help" }
   | { name: "version" }
   | { name: "init" }
-  | { name: "scan"; url: string; maxPages?: number };
+  | { name: "scan"; url: string; maxPages?: number; concurrency?: number };
 
 export type ParseResult =
   | { command: WebWatchCommand }
@@ -41,20 +44,34 @@ export function parseCommand(args: string[]): ParseResult {
   }
   if (first === "scan") {
     if (second === undefined) {
-      return { error: "Usage: webwatch scan <url> [--max-pages <number>]" };
+      return { error: "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>]" };
     }
     if (!isValidHttpUrl(second)) {
       return { error: "Invalid URL. Use an absolute http:// or https:// URL without credentials." };
     }
-    if (extra.length === 0) return { command: { name: "scan", url: second } };
-    if (extra.length !== 2 || extra[0] !== "--max-pages") {
-      return { error: "Usage: webwatch scan <url> [--max-pages <number>]" };
+    const command: Extract<WebWatchCommand, { name: "scan" }> = { name: "scan", url: second };
+    for (let index = 0; index < extra.length; index += 2) {
+      const option = extra[index];
+      const value = extra[index + 1];
+      if (value === undefined || (option !== "--max-pages" && option !== "--concurrency")) {
+        return { error: "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>]" };
+      }
+      const number = Number(value);
+      if (option === "--max-pages") {
+        if (command.maxPages !== undefined) return { error: "--max-pages may only be specified once." };
+        if (!Number.isSafeInteger(number) || number < 1 || number > 1_000) {
+          return { error: "--max-pages must be an integer from 1 to 1000." };
+        }
+        command.maxPages = number;
+      } else {
+        if (command.concurrency !== undefined) return { error: "--concurrency may only be specified once." };
+        if (!Number.isSafeInteger(number) || number < 1 || number > 32) {
+          return { error: "--concurrency must be an integer from 1 to 32." };
+        }
+        command.concurrency = number;
+      }
     }
-    const maxPages = Number(extra[1]);
-    if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 1_000) {
-      return { error: "--max-pages must be an integer from 1 to 1000." };
-    }
-    return { command: { name: "scan", url: second, maxPages } };
+    return { command };
   }
 
   return { error: `Unknown command: ${first}` };

@@ -2,7 +2,7 @@
 
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { crawl, parseCommand, version } from "@webwatch/core";
+import { parseCommand, scan, version } from "@webwatch/core";
 
 const helpText = `WebWatch ${version}
 
@@ -11,8 +11,9 @@ Usage:
 
 Commands:
   init                 Create a minimal webwatch.config.ts
-  scan <url>           Crawl same-origin pages (static HTML only)
+  scan <url>           Crawl pages and check HTTP resources
                        [--max-pages <number>] (default: 100)
+                       [--concurrency <number>] (default: 4)
 
 Options:
   -h, --help           Show this help
@@ -49,7 +50,10 @@ async function main(): Promise<void> {
       return;
     }
     case "scan": {
-      const crawlResult = await crawl(result.command.url, { maxPages: result.command.maxPages });
+      const crawlResult = await scan(result.command.url, {
+        maxPages: result.command.maxPages,
+        concurrency: result.command.concurrency,
+      });
       console.log(`Crawled ${crawlResult.stats.pagesVisited} page(s) from ${crawlResult.startUrl}`);
       for (const page of crawlResult.pages) {
         if (page.error !== undefined) {
@@ -60,6 +64,12 @@ async function main(): Promise<void> {
         }
       }
       console.log(`Discovered ${crawlResult.stats.uniqueUrlsDiscovered} unique URL(s); followed ${crawlResult.stats.redirectsFollowed} redirect(s).`);
+      console.log(`Found ${crawlResult.findings.length} issue(s).`);
+      for (const finding of crawlResult.findings) {
+        console.log(`[${finding.severity.toUpperCase()}] ${finding.type} ${finding.url}: ${finding.message}`);
+        console.log(`  evidence: ${JSON.stringify(finding.evidence)}`);
+      }
+      if (crawlResult.findings.some((finding) => finding.severity === "error")) process.exitCode = 1;
     }
   }
 }
