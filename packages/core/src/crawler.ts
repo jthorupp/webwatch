@@ -1,5 +1,5 @@
-import { extractAnchorHrefs, resolveBaseUrl, resolveCrawlLink } from "./crawler/html.js";
-import { headerValue, loadPage } from "./crawler/http.js";
+import { extractPageReferences, resolveBaseUrl, resolveCrawlLink } from "./crawler/html.js";
+import { headerValue, loadPage, ResponseSizeLimitError } from "./crawler/http.js";
 import { boundedInteger, normalizeCrawlUrl, resolveAndValidate, resolvePublicAddresses } from "./crawler/url-safety.js";
 import type { CrawlLimits, CrawlOptions, CrawlPage, CrawlResult, CrawlStats, CrawlerNetworkForTests } from "./crawler/types.js";
 
@@ -60,11 +60,20 @@ export async function crawlWithNetwork(
         statusCode: loaded.statusCode,
         contentType: headerValue(loaded.headers["content-type"]),
         links: [],
+        internalLinks: [],
+        resources: [],
       };
       collectPageLinks(page, loaded.body, origin, discovered, queue, stats);
       pages.push(page);
     } catch (error) {
-      pages.push({ url: requestedUrl, links: [], error: errorMessage(error) });
+      pages.push({
+        url: requestedUrl,
+        links: [],
+        internalLinks: [],
+        resources: [],
+        ...(error instanceof ResponseSizeLimitError ? { statusCode: error.statusCode } : {}),
+        error: errorMessage(error),
+      });
     }
   }
 
@@ -95,10 +104,11 @@ function collectPageLinks(
   const contentType = page.contentType?.toLowerCase() ?? "";
   if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) return;
 
-  const extracted = extractAnchorHrefs(body);
+  const extracted = extractPageReferences(body);
   stats.linksFound += extracted.foundCount;
   stats.linksTruncated += extracted.truncated;
   const baseUrl = resolveBaseUrl(extracted.baseHref, page.finalUrl ?? page.url);
+  const pageLinks = new Set<string>();
 
   for (const href of extracted.hrefs) {
     const target = resolveCrawlLink(href, baseUrl);
@@ -108,6 +118,10 @@ function collectPageLinks(
     }
 
     const normalized = target.href;
+    if (!pageLinks.has(normalized)) {
+      page.internalLinks.push(normalized);
+      pageLinks.add(normalized);
+    }
     if (discovered.has(normalized)) {
       stats.duplicateLinksSkipped += 1;
       continue;
@@ -120,6 +134,16 @@ function collectPageLinks(
     discovered.add(normalized);
     page.links.push(normalized);
     queue.push(normalized);
+  }
+
+  const pageResources = new Set<string>();
+  for (const resource of extracted.resources) {
+    const target = resolveCrawlLink(resource.url, baseUrl);
+    if (target === undefined) continue;
+    const key = `${resource.type}:${target.href}`;
+    if (pageResources.has(key)) continue;
+    page.resources.push({ type: resource.type, url: target.href });
+    pageResources.add(key);
   }
 }
 
