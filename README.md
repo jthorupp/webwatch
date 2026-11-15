@@ -9,3 +9,5 @@ The CLI includes a static URL crawler and HTTP resource checks. It follows uniqu
 Install dependencies with `pnpm install`, then run `pnpm lint`, `pnpm typecheck`, `pnpm test`, or `pnpm build` from the repository root.
 
 After building, run the CLI locally with `node apps/cli/dist/index.js --help`. `webwatch init` creates a starter `webwatch.config.ts`; `webwatch scan <url> [--max-pages 100] [--concurrency 4]` crawls pages and checks HTTP resources.
+
+See [docs/ci.md](docs/ci.md) for CI behavior and the GitHub branch protection settings needed to require its quality checks before merging.
