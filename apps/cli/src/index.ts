@@ -64,6 +64,9 @@ async function main(): Promise<void> {
         }
       }
       console.log(`Discovered ${crawlResult.stats.uniqueUrlsDiscovered} unique URL(s); followed ${crawlResult.stats.redirectsFollowed} redirect(s).`);
+      if (crawlResult.resourceChecksTruncated) {
+        console.warn("Warning: resource checks were truncated at the safety limit; scan results are incomplete.");
+      }
       console.log(`Found ${crawlResult.findings.length} issue(s).`);
       for (const finding of crawlResult.findings) {
         console.log(`[${finding.severity.toUpperCase()}] ${finding.type} ${finding.url}: ${finding.message}`);

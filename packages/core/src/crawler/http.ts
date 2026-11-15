@@ -20,6 +20,7 @@ export async function loadPage(
   network: CrawlerNetworkForTests,
   timeoutMs: number,
   maxResponseBytes: number,
+  allowCrossOriginRedirects = false,
 ): Promise<LoadedPage> {
   let url = initialUrl;
   const redirectChain = new Set([url.href]);
@@ -34,7 +35,7 @@ export async function loadPage(
     if (redirectCount >= MAX_REDIRECTS) throw new Error(`Too many redirects (maximum ${MAX_REDIRECTS}).`);
 
     const nextUrl = normalizeCrawlUrl(new URL(location, url).href);
-    if (nextUrl.origin !== origin) {
+    if (!allowCrossOriginRedirects && nextUrl.origin !== origin) {
       throw new Error(`Blocked cross-origin redirect to ${nextUrl.origin}.`);
     }
     if (redirectChain.has(nextUrl.href)) throw new Error("Redirect loop detected.");

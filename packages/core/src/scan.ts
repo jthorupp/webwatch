@@ -17,6 +17,7 @@ export interface ScanOptions extends CrawlOptions {
 
 export interface ScanResult extends CrawlResult {
   findings: Finding[];
+  resourceChecksTruncated: boolean;
 }
 
 interface TargetUse {
@@ -38,17 +39,28 @@ export async function scanWithNetwork(
   url: string,
   options: ScanOptions,
   network: CrawlerNetworkForTests,
+  maxCheckTargets = MAX_CHECK_TARGETS,
 ): Promise<ScanResult> {
   const concurrency = boundedInteger(options.concurrency ?? DEFAULT_CONCURRENCY, "concurrency", 1, MAX_CONCURRENCY);
   const timeoutMs = boundedInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, "timeoutMs", 1, 120_000);
   const maxResponseBytes = boundedInteger(options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES, "maxResponseBytes", 1, 10 * 1024 * 1024);
+  const targetLimit = boundedInteger(maxCheckTargets, "maxCheckTargets", 1, MAX_CHECK_TARGETS);
   const crawl = await crawlWithNetwork(url, options, network);
-  const targets = collectTargets(crawl.pages);
+  const { targets, truncated } = collectTargets(crawl.pages, targetLimit);
   const knownResults = collectCrawlResults(crawl.pages);
   const pending = [...targets.values()].filter((target) => !knownResults.has(target.url));
   const checked = await mapConcurrent(pending, concurrency, async (target): Promise<CheckResult> => {
     try {
-      const result = await loadPage(new URL(target.url), new URL(target.url).origin, network, timeoutMs, maxResponseBytes);
+      const targetUrl = new URL(target.url);
+      const resourceOnly = target.internalLinkSources.size === 0 && target.resourceSources.size > 0;
+      const result = await loadPage(
+        targetUrl,
+        targetUrl.origin,
+        network,
+        timeoutMs,
+        maxResponseBytes,
+        resourceOnly,
+      );
       return { statusCode: result.statusCode };
     } catch (error) {
       return {
@@ -66,12 +78,19 @@ export async function scanWithNetwork(
   const findings: Finding[] = [];
   const httpErrorUrls = new Set<string>();
   for (const page of crawl.pages) {
-    if (page.statusCode !== undefined && page.statusCode >= 400) {
+    if ((page.statusCode !== undefined && page.statusCode >= 400) ||
+      (page.statusCode === undefined && page.error !== undefined)) {
       const pageUrl = page.finalUrl ?? page.url;
-      findings.push(createFinding("http-error", pageUrl, `Received HTTP ${page.statusCode}.`, {
-        statusCode: page.statusCode,
+      findings.push(createFinding(
+        "http-error",
+        pageUrl,
+        page.statusCode === undefined ? `Page request failed: ${page.error}.` : `Received HTTP ${page.statusCode}.`,
+        {
+        ...(page.statusCode === undefined ? {} : { statusCode: page.statusCode }),
         sourceUrls: [page.url],
-      }));
+        ...(page.error === undefined ? {} : { error: page.error }),
+        },
+      ));
       httpErrorUrls.add(pageUrl);
     }
   }
@@ -117,16 +136,20 @@ export async function scanWithNetwork(
     }
   }
 
-  findings.sort((left, right) => compareStrings(left.url, right.url) || compareStrings(left.type, right.type));
-  return { ...crawl, findings };
+  findings.sort(compareFindings);
+  return { ...crawl, findings, resourceChecksTruncated: truncated };
 }
 
-function collectTargets(pages: CrawlPage[]): Map<string, TargetUse> {
+function collectTargets(pages: CrawlPage[], targetLimit: number): { targets: Map<string, TargetUse>; truncated: boolean } {
   const targets = new Map<string, TargetUse>();
+  let truncated = false;
   const getTarget = (url: string): TargetUse | undefined => {
     let target = targets.get(url);
     if (target === undefined) {
-      if (targets.size >= MAX_CHECK_TARGETS) return undefined;
+      if (targets.size >= targetLimit) {
+        truncated = true;
+        return undefined;
+      }
       target = { url, internalLinkSources: new Set(), resourceSources: new Map() };
       targets.set(url, target);
     }
@@ -148,7 +171,7 @@ function collectTargets(pages: CrawlPage[]): Map<string, TargetUse> {
       sources.add(page.finalUrl ?? page.url);
     }
   }
-  return targets;
+  return { targets, truncated };
 }
 
 function collectCrawlResults(pages: CrawlPage[]): Map<string, CheckResult> {
@@ -201,6 +224,10 @@ async function mapConcurrent<T, R>(items: T[], concurrency: number, task: (item:
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function compareFindings(left: Finding, right: Finding): number {
+  return compareStrings(left.url, right.url) || compareStrings(left.type, right.type);
 }
 
 function compareStrings(left: string, right: string): number {

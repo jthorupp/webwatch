@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo, LookupFunction } from "node:net";
+import { isIP, type AddressInfo, type LookupFunction } from "node:net";
 import test from "node:test";
-import { scanWithNetwork } from "../src/scan.js";
+import { compareFindings, scanWithNetwork } from "../src/scan.js";
 
 type Handler = (request: IncomingMessage, response: ServerResponse) => void;
 
@@ -15,7 +15,8 @@ async function startServer(handler: Handler): Promise<{ server: Server; port: nu
   return { server, port: (server.address() as AddressInfo).port };
 }
 
-function network(privateHost?: string) {
+function network(privateHost?: string, resolver?: (hostname: string, lookupNumber: number) => string) {
+  const lookups = new Map<string, number>();
   const lookup = ((
     _hostname: string,
     options: { all?: boolean },
@@ -25,10 +26,16 @@ function network(privateHost?: string) {
     else callback(null, "127.0.0.1", 4);
   }) as LookupFunction;
   return {
-    resolveHost: async (hostname: string) => [{
-      address: hostname === privateHost ? "10.0.0.8" : "93.184.216.34",
-      family: 4 as const,
-    }],
+    resolveHost: async (hostname: string) => {
+      const lookupNumber = (lookups.get(hostname) ?? 0) + 1;
+      lookups.set(hostname, lookupNumber);
+      return [{
+        address: isIP(hostname) === 4 || isIP(hostname) === 6
+          ? hostname
+          : resolver?.(hostname, lookupNumber) ?? (hostname === privateHost ? "10.0.0.8" : "93.184.216.34"),
+        family: 4 as const,
+      }];
+    },
     lookup,
   };
 }
@@ -60,7 +67,10 @@ test("reports broken internal links, failed assets, and HTTP error responses wit
     });
     response.end(path === "/good.png" ? "image" : "<p>Done</p>");
   });
-  t.after(() => closeServer(server));
+  t.after(async () => {
+    server.closeAllConnections();
+    await closeServer(server);
+  });
 
   const result = await scanWithNetwork(`http://example.com:${port}/`, {}, network());
   const types = result.findings.map((finding) => finding.type);
@@ -70,12 +80,14 @@ test("reports broken internal links, failed assets, and HTTP error responses wit
   assert.ok(types.includes("failed-stylesheet"));
   assert.ok(types.includes("failed-script"));
   assert.deepEqual(
-    result.findings.filter((finding) => finding.type === "http-error").map((finding) => finding.evidence.statusCode).sort(),
+    result.findings.filter((finding) => finding.type === "http-error")
+      .map((finding) => finding.evidence.statusCode ?? -1).sort((left, right) => left - right),
     [403, 403, 404, 404, 500, 503],
   );
   assert.equal(requests.get("/gone.png"), 1, "duplicate resource URLs should be fetched once");
   assert.equal(requests.get("/shared"), 1, "a resource shared with a crawled link should not be fetched again");
-  assert.deepEqual(result.findings, [...result.findings].sort((a, b) => a.url.localeCompare(b.url) || a.type.localeCompare(b.type)));
+  assert.deepEqual(result.findings, [...result.findings].sort(compareFindings));
+  assert.equal(result.resourceChecksTruncated, false);
 });
 
 test("bounds concurrent resource checks and blocks private resource destinations", async (t) => {
@@ -139,4 +151,145 @@ test("applies request timeouts and response size limits to resource checks", asy
   assert.match(large?.evidence.error ?? "", /Response exceeded the 64 byte limit/);
   assert.ok(result.findings.some((finding) => finding.type === "http-error" && finding.evidence.statusCode === 404));
   assert.match(slow?.evidence.error ?? "", /Request timed out after 20 ms/);
+});
+
+test("checks public cross-origin resources and follows safe cross-origin resource redirects", async (t) => {
+  const requests: string[] = [];
+  const { server, port } = await startServer((request, response) => {
+    const path = request.url ?? "/";
+    const host = request.headers.host ?? "";
+    requests.push(`${host}${path}`);
+    if (host.startsWith("example.com") && path === "/") {
+      response.setHeader("content-type", "text/html");
+      response.end(`<a href="http://outside.example.org:${port}/navigation">external navigation</a>
+        <img src="http://cdn.example.org:${port}/image.png">
+        <link rel="stylesheet" href="http://cdn.example.org:${port}/site.css">
+        <script src="http://cdn.example.org:${port}/redirect-script"></script>`);
+      return;
+    }
+    if (path === "/redirect-script") {
+      response.writeHead(302, { location: `http://static.example.net:${port}/script.js` }).end();
+      return;
+    }
+    response.end("asset");
+  });
+  t.after(() => closeServer(server));
+
+  const result = await scanWithNetwork(`http://example.com:${port}/`, {}, network());
+
+  assert.ok(requests.includes(`cdn.example.org:${port}/image.png`));
+  assert.ok(requests.includes(`cdn.example.org:${port}/site.css`));
+  assert.ok(requests.includes(`cdn.example.org:${port}/redirect-script`));
+  assert.ok(requests.includes(`static.example.net:${port}/script.js`));
+  assert.equal(requests.some((request) => request.includes("outside.example.org")), false);
+  assert.deepEqual(result.findings, []);
+});
+
+test("blocks private resource destinations and revalidates redirect destinations", async (t) => {
+  const requests: string[] = [];
+  const { server, port } = await startServer((request, response) => {
+    const path = request.url ?? "/";
+    requests.push(path);
+    if (path === "/") {
+      response.setHeader("content-type", "text/html");
+      response.end(`<img src="http://10.0.0.8:${port}/private-ip">
+        <img src="http://private.example.org:${port}/private-dns">
+        <img src="http://cdn.example.org:${port}/redirect-private">`);
+      return;
+    }
+    if (path === "/redirect-private") {
+      response.writeHead(302, { location: `http://10.0.0.9:${port}/private-redirect-target` }).end();
+      return;
+    }
+    response.end("unexpected request");
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await closeServer(server);
+  });
+
+  const result = await scanWithNetwork(`http://example.com:${port}/`, {}, network("private.example.org"));
+
+  assert.equal(requests.includes("/private-ip"), false);
+  assert.equal(requests.includes("/private-dns"), false);
+  assert.equal(requests.includes("/private-redirect-target"), false);
+  assert.equal(result.findings.filter((finding) => finding.type === "broken-image").length, 3);
+  assert.ok(result.findings.every((finding) => /Blocked|redirect/i.test(finding.evidence.error ?? "")));
+});
+
+test("re-resolves a public cross-origin resource before following its redirect", async (t) => {
+  const requests: string[] = [];
+  const { server, port } = await startServer((request, response) => {
+    const path = request.url ?? "/";
+    requests.push(path);
+    if (path === "/") {
+      response.setHeader("content-type", "text/html");
+      response.end(`<img src="http://cdn.example.org:${port}/redirect">`);
+      return;
+    }
+    if (path === "/redirect") {
+      response.writeHead(302, { location: "/redirect-target" }).end();
+      return;
+    }
+    response.end("must not fetch after DNS changes");
+  });
+  t.after(() => closeServer(server));
+  const resolver = (hostname: string, lookupNumber: number): string =>
+    hostname === "cdn.example.org" && lookupNumber > 1 ? "10.0.0.7" : "93.184.216.34";
+
+  const result = await scanWithNetwork(`http://example.com:${port}/`, {}, network(undefined, resolver));
+
+  assert.equal(requests.includes("/redirect-target"), false);
+  const finding = result.findings.find((item) => item.type === "broken-image");
+  assert.match(finding?.evidence.error ?? "", /Blocked non-public network destination/);
+});
+
+test("reports crawled page network failures and timeouts as http-error findings", async (t) => {
+  const { server, port } = await startServer((request, response) => {
+    if (request.url === "/") {
+      response.setHeader("content-type", "text/html");
+      response.end('<a href="/disconnect">disconnect</a><a href="/timeout">timeout</a>');
+      return;
+    }
+    if (request.url === "/disconnect") {
+      response.destroy();
+      return;
+    }
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await closeServer(server);
+  });
+
+  const result = await scanWithNetwork(`http://example.com:${port}/`, { timeoutMs: 25 }, network());
+  const disconnectedUrl = `http://example.com:${port}/disconnect`;
+  const timeoutUrl = `http://example.com:${port}/timeout`;
+  const disconnected = result.findings.find((finding) => finding.type === "http-error" && finding.url === disconnectedUrl);
+  const timedOut = result.findings.find((finding) => finding.type === "http-error" && finding.url === timeoutUrl);
+
+  assert.equal(disconnected?.evidence.statusCode, undefined);
+  assert.match(disconnected?.evidence.error ?? "", /socket hang up|reset/i);
+  assert.equal(timedOut?.evidence.statusCode, undefined);
+  assert.match(timedOut?.evidence.error ?? "", /Request timed out after 25 ms/);
+});
+
+test("marks resource checks incomplete when the target safety limit truncates them", async (t) => {
+  const requests: string[] = [];
+  const { server, port } = await startServer((request, response) => {
+    const path = request.url ?? "/";
+    requests.push(path);
+    if (path === "/") {
+      response.setHeader("content-type", "text/html");
+      response.end('<img src="/one"><img src="/two"><img src="/three">');
+      return;
+    }
+    response.end("asset");
+  });
+  t.after(() => closeServer(server));
+
+  const result = await scanWithNetwork(`http://example.com:${port}/`, { maxPages: 1 }, network(), 2);
+
+  assert.equal(result.resourceChecksTruncated, true);
+  assert.equal(requests.includes("/three"), false);
+  assert.equal(requests.filter((path) => path !== "/").length, 2);
 });
