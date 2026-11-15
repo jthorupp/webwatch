@@ -9,4 +9,4 @@ The intended quality checks include:
 - Resource validation
 - Visual comparisons
 
-The first project milestone is a small, maintainable foundation. Scanning behavior and infrastructure choices are intentionally out of scope for this initial setup.
+The first milestone is a small, maintainable foundation. The initial crawler fetches static HTML and follows same-origin links; browser checks and broader infrastructure remain outside this scope.
