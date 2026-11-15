@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isValidHttpUrl, parseCommand } from "./index.js";
+import { isValidHttpUrl, parseCommand } from "../src/index.js";
 
 test("parses help and version options", () => {
   assert.deepEqual(parseCommand(["--help"]), { command: { name: "help" } });
@@ -36,3 +36,4 @@ test("accepts only absolute HTTP and HTTPS URLs", () => {
   assert.equal(isValidHttpUrl("example.com"), false);
   assert.equal(isValidHttpUrl("javascript:alert(1)"), false);
 });
+

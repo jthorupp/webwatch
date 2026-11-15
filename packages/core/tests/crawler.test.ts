@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo, LookupFunction } from "node:net";
 import test from "node:test";
-import { crawl, crawlWithNetwork, isPublicIpAddress } from "./crawler.js";
+import { crawl, crawlWithNetwork, isPublicIpAddress } from "../src/crawler.js";
 
 type Handler = (request: IncomingMessage, response: ServerResponse) => void;
 
@@ -199,3 +199,4 @@ test("applies the configured request timeout", async (t) => {
 
   assert.match(result.pages[0].error ?? "", /Request timed out after 20 ms/);
 });
+
