@@ -12,10 +12,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
-    "test": "tsx --test",
+    "test": "tsx --test src/**/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^24.19.2"
+  },
+  "dependencies": {
+    "parse5": "8.1.1"
   }
 }
