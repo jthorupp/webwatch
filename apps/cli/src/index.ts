@@ -2,7 +2,7 @@
 
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseCommand, version } from "@webwatch/core";
+import { crawl, parseCommand, version } from "@webwatch/core";
 
 const helpText = `WebWatch ${version}
 
@@ -11,7 +11,8 @@ Usage:
 
 Commands:
   init                 Create a minimal webwatch.config.ts
-  scan <url>           Validate a URL (scanning is not implemented yet)
+  scan <url>           Crawl same-origin pages (static HTML only)
+                       [--max-pages <number>] (default: 100)
 
 Options:
   -h, --help           Show this help
@@ -47,9 +48,19 @@ async function main(): Promise<void> {
       }
       return;
     }
-    case "scan":
-      console.log(`URL is valid: ${result.command.url}`);
-      console.log("Scanning is not implemented yet.");
+    case "scan": {
+      const crawlResult = await crawl(result.command.url, { maxPages: result.command.maxPages });
+      console.log(`Crawled ${crawlResult.stats.pagesVisited} page(s) from ${crawlResult.startUrl}`);
+      for (const page of crawlResult.pages) {
+        if (page.error !== undefined) {
+          console.error(`Failed ${page.url}: ${page.error}`);
+          process.exitCode = 1;
+        } else {
+          console.log(`${page.statusCode ?? "?"} ${page.finalUrl ?? page.url} (${page.links.length} new link(s))`);
+        }
+      }
+      console.log(`Discovered ${crawlResult.stats.uniqueUrlsDiscovered} unique URL(s); followed ${crawlResult.stats.redirectsFollowed} redirect(s).`);
+    }
   }
 }
 
