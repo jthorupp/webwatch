@@ -12,8 +12,9 @@ After building, run the CLI locally with `node apps/cli/dist/index.js --help`. `
 
 ```sh
 node apps/cli/dist/index.js scan https://example.com
+node apps/cli/dist/index.js scan https://example.com --format json
 ```
 
-Scans print a deterministic summary and findings grouped by severity and type. Exit code `0` means the scan completed without findings, `1` means error findings were detected, and `2` means checks were incomplete without error findings. See [docs/scan-results.md](docs/scan-results.md) for details.
+Scans print a deterministic summary and findings grouped by severity and type by default. Use `--format json` for machine-readable results. Exit code `0` means the scan completed without findings, `1` means error findings were detected, and `2` means checks were incomplete without error findings. See [docs/scan-results.md](docs/scan-results.md) for details and a JSON example.
 
 See [docs/ci.md](docs/ci.md) for CI behavior and the GitHub branch protection settings needed to require its quality checks before merging.

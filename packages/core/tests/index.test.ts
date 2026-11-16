@@ -18,11 +18,14 @@ test("parses init and scan commands", () => {
   assert.deepEqual(parseCommand(["scan", "https://example.com", "--max-pages", "5", "--concurrency", "3"]), {
     command: { name: "scan", url: "https://example.com", maxPages: 5, concurrency: 3 },
   });
+  assert.deepEqual(parseCommand(["scan", "https://example.com", "--format", "json"]), {
+    command: { name: "scan", url: "https://example.com", format: "json" },
+  });
 });
 
 test("rejects malformed commands and invalid scan URLs", () => {
   assert.deepEqual(parseCommand(["scan"]), {
-    error: "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>]",
+    error: "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>] [--format json]",
   });
   assert.deepEqual(parseCommand(["scan", "file:///tmp/page"]), {
     error: "Invalid URL. Use an absolute http:// or https:// URL without credentials.",
@@ -32,6 +35,15 @@ test("rejects malformed commands and invalid scan URLs", () => {
   });
   assert.deepEqual(parseCommand(["scan", "https://example.com", "--concurrency", "33"]), {
     error: "--concurrency must be an integer from 1 to 32.",
+  });
+  assert.deepEqual(parseCommand(["scan", "https://example.com", "--format", "yaml"]), {
+    error: "--format only supports json.",
+  });
+  assert.deepEqual(parseCommand(["scan", "https://example.com", "--format"]), {
+    error: "--format only supports json.",
+  });
+  assert.deepEqual(parseCommand(["scan", "https://example.com", "--format", "json", "--format", "json"]), {
+    error: "--format may only be specified once.",
   });
   assert.deepEqual(parseCommand(["unknown"]), { error: "Unknown command: unknown" });
 });

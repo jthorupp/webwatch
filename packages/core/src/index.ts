@@ -10,7 +10,7 @@ export type WebWatchCommand =
   | { name: "help" }
   | { name: "version" }
   | { name: "init" }
-  | { name: "scan"; url: string; maxPages?: number; concurrency?: number };
+  | { name: "scan"; url: string; maxPages?: number; concurrency?: number; format?: "json" };
 
 export type ParseResult =
   | { command: WebWatchCommand }
@@ -44,7 +44,7 @@ export function parseCommand(args: string[]): ParseResult {
   }
   if (first === "scan") {
     if (second === undefined) {
-      return { error: "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>]" };
+      return { error: scanUsage() };
     }
     if (!isValidHttpUrl(second)) {
       return { error: "Invalid URL. Use an absolute http:// or https:// URL without credentials." };
@@ -54,8 +54,15 @@ export function parseCommand(args: string[]): ParseResult {
       const option = extra[index];
       const value = extra[index + 1];
       if (value === undefined || (option !== "--max-pages" && option !== "--concurrency")) {
-        return { error: "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>]" };
+        if (option !== "--format") return { error: scanUsage() };
       }
+      if (option === "--format") {
+        if (command.format !== undefined) return { error: "--format may only be specified once." };
+        if (value !== "json") return { error: "--format only supports json." };
+        command.format = "json";
+        continue;
+      }
+      if (value === undefined) return { error: scanUsage() };
       const number = Number(value);
       if (option === "--max-pages") {
         if (command.maxPages !== undefined) return { error: "--max-pages may only be specified once." };
@@ -75,4 +82,8 @@ export function parseCommand(args: string[]): ParseResult {
   }
 
   return { error: `Unknown command: ${first}` };
+}
+
+function scanUsage(): string {
+  return "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>] [--format json]";
 }

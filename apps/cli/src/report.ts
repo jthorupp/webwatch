@@ -12,6 +12,31 @@ export function getScanExitCode(result: ScanResult): 0 | 1 | 2 {
   return 0;
 }
 
+export type CompletenessReason =
+  | { type: "pages-truncated"; count: number }
+  | { type: "links-truncated"; count: number }
+  | { type: "resource-checks-truncated" };
+
+export interface JsonScanResult extends ScanResult {
+  completeness: {
+    isComplete: boolean;
+    reasons: CompletenessReason[];
+  };
+}
+
+export function formatScanJson(result: ScanResult): string {
+  const reasons: CompletenessReason[] = [];
+  if (result.stats.pagesTruncated > 0) reasons.push({ type: "pages-truncated", count: result.stats.pagesTruncated });
+  if (result.stats.linksTruncated > 0) reasons.push({ type: "links-truncated", count: result.stats.linksTruncated });
+  if (result.resourceChecksTruncated) reasons.push({ type: "resource-checks-truncated" });
+
+  const structuredResult: JsonScanResult = {
+    ...result,
+    completeness: { isComplete: reasons.length === 0, reasons },
+  };
+  return JSON.stringify(structuredResult, null, 2);
+}
+
 export function formatScanReport(result: ScanResult): string {
   const incomplete = isScanIncomplete(result);
   const hasFindings = result.findings.length > 0;
