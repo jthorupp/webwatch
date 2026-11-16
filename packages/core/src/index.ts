@@ -59,32 +59,39 @@ export function parseCommand(args: string[]): ParseResult {
       return { error: "Invalid URL. Use an absolute http:// or https:// URL without credentials." };
     }
     const command: Extract<WebWatchCommand, { name: "scan" }> = { name: "scan", url: second };
-    for (let index = 0; index < extra.length; index += 2) {
+    const seenOptions = new Set<string>();
+    for (let index = 0; index < extra.length; index += 1) {
       const option = extra[index];
+      if (option !== "--format" && option !== "--max-pages" && option !== "--concurrency") {
+        return { error: scanUsage() };
+      }
+      if (seenOptions.has(option)) return { error: `${option} may only be specified once.` };
+      seenOptions.add(option);
+
       const value = extra[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        return { error: option === "--format" ? "--format requires a value: json." : `${option} requires a value.` };
+      }
+
       if (option === "--format") {
-        if (command.format !== undefined) return { error: "--format may only be specified once." };
-        if (value === undefined) return { error: "--format requires a value: json." };
         if (value !== "json") return { error: "--format only supports json." };
         command.format = "json";
+        index += 1;
         continue;
       }
-      if (option !== "--max-pages" && option !== "--concurrency") return { error: scanUsage() };
-      if (value === undefined) return { error: scanUsage() };
       const number = Number(value);
       if (option === "--max-pages") {
-        if (command.maxPages !== undefined) return { error: "--max-pages may only be specified once." };
         if (!Number.isSafeInteger(number) || number < 1 || number > 1_000) {
           return { error: "--max-pages must be an integer from 1 to 1000." };
         }
         command.maxPages = number;
       } else {
-        if (command.concurrency !== undefined) return { error: "--concurrency may only be specified once." };
         if (!Number.isSafeInteger(number) || number < 1 || number > 32) {
           return { error: "--concurrency must be an integer from 1 to 32." };
         }
         command.concurrency = number;
       }
+      index += 1;
     }
     return { command };
   }
