@@ -8,6 +8,6 @@ In the repository's GitHub settings, create or update a branch protection rule (
 
 1. Enable **Require a pull request before merging**.
 2. Enable **Require status checks to pass before merging**.
-3. Select **WebWatch CI / Quality gates** as a required status check.
+3. Select **Quality gates** as a required status check.
 
 The workflow grants the token read-only `contents` permission and does not run with `pull_request_target`.
