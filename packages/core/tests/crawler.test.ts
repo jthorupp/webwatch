@@ -117,6 +117,21 @@ test("does not exceed the configured maxPages limit", async (t) => {
   assert.equal(result.stats.pagesTruncated, 2);
 });
 
+test("reports resource references omitted by the per-page extraction limit", async (t) => {
+  const resourceMarkup = Array.from({ length: 10_001 }, (_, index) => `<img src="/image-${index}.png">`).join("");
+  const { server, port } = await startServer((_request, response) => {
+    response.setHeader("content-type", "text/html");
+    response.end(resourceMarkup);
+  });
+  t.after(() => closeServer(server));
+  const { network } = testNetwork();
+
+  const result = await crawlWithNetwork(`http://example.com:${port}/`, {}, network);
+
+  assert.equal(result.pages[0]?.resources.length, 10_000);
+  assert.equal(result.stats.resourcesTruncated, 1);
+});
+
 test("follows same-origin redirects and removes fragments from the final URL", async (t) => {
   const requested: string[] = [];
   const { server, port } = await startServer((request, response) => {

@@ -53,15 +53,14 @@ export function parseCommand(args: string[]): ParseResult {
     for (let index = 0; index < extra.length; index += 2) {
       const option = extra[index];
       const value = extra[index + 1];
-      if (value === undefined || (option !== "--max-pages" && option !== "--concurrency")) {
-        if (option !== "--format") return { error: scanUsage() };
-      }
       if (option === "--format") {
         if (command.format !== undefined) return { error: "--format may only be specified once." };
+        if (value === undefined) return { error: "--format requires a value: json." };
         if (value !== "json") return { error: "--format only supports json." };
         command.format = "json";
         continue;
       }
+      if (option !== "--max-pages" && option !== "--concurrency") return { error: scanUsage() };
       if (value === undefined) return { error: scanUsage() };
       const number = Number(value);
       if (option === "--max-pages") {

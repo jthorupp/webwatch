@@ -40,12 +40,18 @@ test("rejects malformed commands and invalid scan URLs", () => {
     error: "--format only supports json.",
   });
   assert.deepEqual(parseCommand(["scan", "https://example.com", "--format"]), {
-    error: "--format only supports json.",
+    error: "--format requires a value: json.",
   });
   assert.deepEqual(parseCommand(["scan", "https://example.com", "--format", "json", "--format", "json"]), {
     error: "--format may only be specified once.",
   });
   assert.deepEqual(parseCommand(["unknown"]), { error: "Unknown command: unknown" });
+  assert.deepEqual(parseCommand(["scan", "https://example.com", "--unknown"]), {
+    error: "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>] [--format json]",
+  });
+  assert.deepEqual(parseCommand(["scan", "https://example.com", "--unknown", "value"]), {
+    error: "Usage: webwatch scan <url> [--max-pages <number>] [--concurrency <number>] [--format json]",
+  });
 });
 
 test("accepts only absolute HTTP and HTTPS URLs", () => {

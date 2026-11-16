@@ -17,6 +17,7 @@ function createResult(): ScanResult {
       externalLinksSkipped: 0,
       duplicateLinksSkipped: 0,
       linksTruncated: 0,
+      resourcesTruncated: 0,
       pagesTruncated: 0,
       redirectsFollowed: 0,
       durationMs: 12,

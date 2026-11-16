@@ -26,6 +26,7 @@ function createResult(): ScanResult {
       externalLinksSkipped: 0,
       duplicateLinksSkipped: 0,
       linksTruncated: 0,
+      resourcesTruncated: 0,
       pagesTruncated: 0,
       redirectsFollowed: 0,
       durationMs: 18,
@@ -46,6 +47,8 @@ test("serializes structured JSON deterministically with findings, stats, and com
   const result = createResult();
   result.stats.pagesTruncated = 2;
   result.stats.linksTruncated = 3;
+  result.stats.resourcesTruncated = 4;
+  result.stats.pagesFailed = 1;
   const first = formatScanJson(result);
   assert.equal(formatScanJson(result), first);
 
@@ -55,12 +58,45 @@ test("serializes structured JSON deterministically with findings, stats, and com
     completeness: {
       isComplete: false,
       reasons: [
+        { type: "pages-failed", count: 1 },
         { type: "pages-truncated", count: 2 },
         { type: "links-truncated", count: 3 },
+        { type: "resources-truncated", count: 4 },
         { type: "resource-checks-truncated" },
       ],
     },
   });
+
+  const extended = createResult();
+  Object.assign(extended, { internalDebugInfo: "must not be serialized" });
+  Object.assign(extended.stats, { internalCounter: 42 });
+  Object.assign(extended.pages[0] ?? {}, { internalCacheKey: "private" });
+  Object.assign(extended.findings[0] ?? {}, { internalDebugInfo: "private" });
+  Object.assign(extended.findings[0]?.evidence ?? {}, { internalResolverData: "private" });
+  const projected = JSON.parse(formatScanJson(extended)) as {
+    internalDebugInfo?: string;
+    stats: { internalCounter?: number };
+    pages: Array<{ internalCacheKey?: string }>;
+    findings: Array<{ internalDebugInfo?: string; evidence: { internalResolverData?: string } }>;
+  };
+  assert.equal(projected.internalDebugInfo, undefined);
+  assert.equal(projected.stats.internalCounter, undefined);
+  assert.equal(projected.pages[0]?.internalCacheKey, undefined);
+  assert.equal(projected.findings[0]?.internalDebugInfo, undefined);
+  assert.equal(projected.findings[0]?.evidence.internalResolverData, undefined);
+});
+
+test("marks failed page fetches as incomplete even without another truncation limit", () => {
+  const result = createResult();
+  result.stats.pagesFailed = 1;
+  result.stats.pagesSucceeded = 0;
+  result.resourceChecksTruncated = false;
+
+  const parsed = JSON.parse(formatScanJson(result)) as {
+    completeness: { isComplete: boolean; reasons: Array<{ type: string; count?: number }> };
+  };
+  assert.equal(parsed.completeness.isComplete, false);
+  assert.deepEqual(parsed.completeness.reasons, [{ type: "pages-failed", count: 1 }]);
 });
 
 test("writes only JSON to stdout and preserves finding exit code 1", async () => {
