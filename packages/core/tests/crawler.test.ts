@@ -114,6 +114,7 @@ test("does not exceed the configured maxPages limit", async (t) => {
   assert.equal(result.pages.length, 2);
   assert.equal(result.stats.pagesVisited, 2);
   assert.equal(result.stats.uniqueUrlsDiscovered, 4);
+  assert.equal(result.stats.pagesTruncated, 2);
 });
 
 test("follows same-origin redirects and removes fragments from the final URL", async (t) => {
