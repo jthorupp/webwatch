@@ -19,6 +19,7 @@ export interface ExtractedResources {
 
 export interface ExtractedPageReferences extends ExtractedLinks {
   resources: ExtractedResources[];
+  resourcesTruncated: number;
 }
 
 export function extractAnchorHrefs(html: string): ExtractedLinks {
@@ -37,8 +38,10 @@ export function extractPageReferences(html: string): ExtractedPageReferences {
   const resources: ExtractedResources[] = [];
   let baseHref: string | undefined;
   let foundCount = 0;
+  let resourcesTruncated = 0;
   const addResource = (type: ResourceType, url: string): void => {
     if (resources.length < MAX_RESOURCES_PER_PAGE) resources.push({ type, url });
+    else resourcesTruncated += 1;
   };
   const visit = (node: DefaultTreeAdapterTypes.Node): void => {
     if ("tagName" in node) {
@@ -71,7 +74,7 @@ export function extractPageReferences(html: string): ExtractedPageReferences {
     if ("childNodes" in node) node.childNodes.forEach(visit);
   };
   visit(document);
-  return { hrefs, baseHref, foundCount, truncated: foundCount - hrefs.length, resources };
+  return { hrefs, baseHref, foundCount, truncated: foundCount - hrefs.length, resources, resourcesTruncated };
 }
 
 export function resolveBaseUrl(baseHref: string | undefined, finalUrl: string): URL {

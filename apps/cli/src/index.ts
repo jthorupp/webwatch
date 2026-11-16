@@ -2,8 +2,8 @@
 
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseCommand, scan, version } from "@webwatch/core";
-import { formatScanReport, getScanExitCode } from "./report.js";
+import { parseCommand, version } from "@webwatch/core";
+import { runScanCommand } from "./scan-command.js";
 
 const helpText = `WebWatch ${version}
 
@@ -15,6 +15,7 @@ Commands:
   scan <url>           Crawl pages and check HTTP resources
                        [--max-pages <number>] (default: 100)
                        [--concurrency <number>] (default: 4)
+                       [--format json] (default: human-readable)
 
 Options:
   -h, --help           Show this help
@@ -51,12 +52,13 @@ async function main(): Promise<void> {
       return;
     }
     case "scan": {
-      const scanResult = await scan(result.command.url, {
+      process.exitCode = await runScanCommand(result.command.url, {
         maxPages: result.command.maxPages,
         concurrency: result.command.concurrency,
+      }, result.command.format, {
+        stdout: (message) => console.log(message),
+        stderr: (message) => console.error(message),
       });
-      console.log(formatScanReport(scanResult));
-      process.exitCode = getScanExitCode(scanResult);
     }
   }
 }

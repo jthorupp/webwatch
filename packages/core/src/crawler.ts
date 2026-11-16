@@ -108,6 +108,7 @@ function collectPageLinks(
   const extracted = extractPageReferences(body);
   stats.linksFound += extracted.foundCount;
   stats.linksTruncated += extracted.truncated;
+  stats.resourcesTruncated += extracted.resourcesTruncated;
   const baseUrl = resolveBaseUrl(extracted.baseHref, page.finalUrl ?? page.url);
   const pageLinks = new Set<string>();
 
@@ -167,6 +168,7 @@ function createEmptyStats(): CrawlStats {
     externalLinksSkipped: 0,
     duplicateLinksSkipped: 0,
     linksTruncated: 0,
+    resourcesTruncated: 0,
     pagesTruncated: 0,
     redirectsFollowed: 0,
     durationMs: 0,
