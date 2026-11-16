@@ -77,6 +77,7 @@ export async function crawlWithNetwork(
     }
   }
 
+  stats.pagesTruncated = queue.filter((requestedUrl) => !visitedFinalUrls.has(requestedUrl)).length;
   return createResult(start.href, pages, discovered, stats, startedAt);
 }
 
@@ -166,6 +167,7 @@ function createEmptyStats(): CrawlStats {
     externalLinksSkipped: 0,
     duplicateLinksSkipped: 0,
     linksTruncated: 0,
+    pagesTruncated: 0,
     redirectsFollowed: 0,
     durationMs: 0,
   };

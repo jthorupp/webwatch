@@ -3,6 +3,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseCommand, scan, version } from "@webwatch/core";
+import { formatScanReport, getScanExitCode } from "./report.js";
 
 const helpText = `WebWatch ${version}
 
@@ -50,29 +51,12 @@ async function main(): Promise<void> {
       return;
     }
     case "scan": {
-      const crawlResult = await scan(result.command.url, {
+      const scanResult = await scan(result.command.url, {
         maxPages: result.command.maxPages,
         concurrency: result.command.concurrency,
       });
-      console.log(`Crawled ${crawlResult.stats.pagesVisited} page(s) from ${crawlResult.startUrl}`);
-      for (const page of crawlResult.pages) {
-        if (page.error !== undefined) {
-          console.error(`Failed ${page.url}: ${page.error}`);
-          process.exitCode = 1;
-        } else {
-          console.log(`${page.statusCode ?? "?"} ${page.finalUrl ?? page.url} (${page.links.length} new link(s))`);
-        }
-      }
-      console.log(`Discovered ${crawlResult.stats.uniqueUrlsDiscovered} unique URL(s); followed ${crawlResult.stats.redirectsFollowed} redirect(s).`);
-      if (crawlResult.resourceChecksTruncated) {
-        console.warn("Warning: resource checks were truncated at the safety limit; scan results are incomplete.");
-      }
-      console.log(`Found ${crawlResult.findings.length} issue(s).`);
-      for (const finding of crawlResult.findings) {
-        console.log(`[${finding.severity.toUpperCase()}] ${finding.type} ${finding.url}: ${finding.message}`);
-        console.log(`  evidence: ${JSON.stringify(finding.evidence)}`);
-      }
-      if (crawlResult.findings.some((finding) => finding.severity === "error")) process.exitCode = 1;
+      console.log(formatScanReport(scanResult));
+      process.exitCode = getScanExitCode(scanResult);
     }
   }
 }

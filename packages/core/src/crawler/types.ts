@@ -27,6 +27,7 @@ export interface CrawlStats {
   externalLinksSkipped: number;
   duplicateLinksSkipped: number;
   linksTruncated: number;
+  pagesTruncated: number;
   redirectsFollowed: number;
   durationMs: number;
 }
