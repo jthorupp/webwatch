@@ -14,6 +14,15 @@ export class ResponseSizeLimitError extends Error {
   }
 }
 
+export class CrossOriginRedirectBlockedError extends Error {
+  readonly code = "cross-origin-redirect-blocked" as const;
+
+  constructor(destinationOrigin: string) {
+    super(`Blocked cross-origin redirect to ${destinationOrigin}.`);
+    this.name = "CrossOriginRedirectBlockedError";
+  }
+}
+
 export async function loadPage(
   initialUrl: URL,
   origin: string,
@@ -36,7 +45,7 @@ export async function loadPage(
 
     const nextUrl = normalizeCrawlUrl(new URL(location, url).href);
     if (!allowCrossOriginRedirects && nextUrl.origin !== origin) {
-      throw new Error(`Blocked cross-origin redirect to ${nextUrl.origin}.`);
+      throw new CrossOriginRedirectBlockedError(nextUrl.origin);
     }
     if (redirectChain.has(nextUrl.href)) throw new Error("Redirect loop detected.");
     // The next iteration resolves and validates this redirect target before connecting.
