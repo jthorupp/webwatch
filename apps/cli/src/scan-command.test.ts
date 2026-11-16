@@ -35,9 +35,16 @@ function createResult(): ScanResult {
       id: "broken-image:https%3A%2F%2Fexample.com%2Fmissing.png",
       type: "broken-image",
       severity: "error",
+      status: "failed",
       url: "https://example.com/missing.png",
       message: "Image returned HTTP 404.",
       evidence: { statusCode: 404, sourceUrls: ["https://example.com/"] },
+    }],
+    linkChecks: [{
+      url: "https://example.com/missing.png",
+      sourceUrls: ["https://example.com/"],
+      status: "failed",
+      statusCode: 404,
     }],
     resourceChecksTruncated: true,
   };
@@ -68,22 +75,47 @@ test("serializes structured JSON deterministically with findings, stats, and com
   });
 
   const extended = createResult();
+  extended.linkChecks = [{
+    url: "https://example.com/about",
+    sourceUrls: ["https://example.com/"],
+    status: "unverified",
+    reason: "cross-origin-redirect-blocked",
+    error: "Blocked cross-origin redirect to https://about.example.net.",
+  }];
+  extended.findings.push({
+    id: "unverified-internal-link:https%3A%2F%2Fexample.com%2Fabout",
+    type: "unverified-internal-link",
+    severity: "warning",
+    status: "unverified",
+    url: "https://example.com/about",
+    message: "This internal link was not verified because the crawler blocked a cross-origin redirect.",
+    evidence: {
+      sourceUrls: ["https://example.com/"],
+      error: "Blocked cross-origin redirect to https://about.example.net.",
+      reason: "cross-origin-redirect-blocked",
+    },
+  });
   Object.assign(extended, { internalDebugInfo: "must not be serialized" });
   Object.assign(extended.stats, { internalCounter: 42 });
   Object.assign(extended.pages[0] ?? {}, { internalCacheKey: "private" });
-  Object.assign(extended.findings[0] ?? {}, { internalDebugInfo: "private" });
-  Object.assign(extended.findings[0]?.evidence ?? {}, { internalResolverData: "private" });
+  Object.assign(extended.findings[1] ?? {}, { internalDebugInfo: "private" });
+  Object.assign(extended.findings[1]?.evidence ?? {}, { internalResolverData: "private" });
+  Object.assign(extended.linkChecks[0] ?? {}, { internalResolverData: "private" });
   const projected = JSON.parse(formatScanJson(extended)) as {
     internalDebugInfo?: string;
     stats: { internalCounter?: number };
     pages: Array<{ internalCacheKey?: string }>;
     findings: Array<{ internalDebugInfo?: string; evidence: { internalResolverData?: string } }>;
+    linkChecks: Array<{ status: string; reason?: string; internalResolverData?: string }>;
   };
   assert.equal(projected.internalDebugInfo, undefined);
   assert.equal(projected.stats.internalCounter, undefined);
   assert.equal(projected.pages[0]?.internalCacheKey, undefined);
-  assert.equal(projected.findings[0]?.internalDebugInfo, undefined);
-  assert.equal(projected.findings[0]?.evidence.internalResolverData, undefined);
+  assert.equal(projected.findings[1]?.internalDebugInfo, undefined);
+  assert.equal(projected.findings[1]?.evidence.internalResolverData, undefined);
+  assert.equal(projected.linkChecks[0]?.status, "unverified");
+  assert.equal(projected.linkChecks[0]?.reason, "cross-origin-redirect-blocked");
+  assert.equal(projected.linkChecks[0]?.internalResolverData, undefined);
 });
 
 test("marks failed page fetches as incomplete even without another truncation limit", () => {

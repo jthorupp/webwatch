@@ -86,8 +86,49 @@ test("reports broken internal links, failed assets, and HTTP error responses wit
   );
   assert.equal(requests.get("/gone.png"), 1, "duplicate resource URLs should be fetched once");
   assert.equal(requests.get("/shared"), 1, "a resource shared with a crawled link should not be fetched again");
+  assert.equal(result.linkChecks.find((check) => check.url.endsWith("/shared"))?.status, "passed");
+  assert.equal(result.linkChecks.find((check) => check.url.endsWith("/gone"))?.status, "failed");
   assert.deepEqual(result.findings, [...result.findings].sort(compareFindings));
   assert.equal(result.resourceChecksTruncated, false);
+});
+
+test("marks cross-origin navigation redirects unverified without duplicate failure findings", async (t) => {
+  const requests: string[] = [];
+  const { server, port } = await startServer((request, response) => {
+    const path = request.url ?? "/";
+    requests.push(path);
+    if (path === "/") {
+      response.setHeader("content-type", "text/html");
+      response.end('<a href="/redirect">Redirect</a><a href="/works">Works</a><a href="/gone">Gone</a>');
+      return;
+    }
+    if (path === "/redirect") {
+      response.writeHead(302, { location: "https://other.example/destination" }).end();
+      return;
+    }
+    response.writeHead(path === "/gone" ? 404 : 200, { "content-type": "text/html" }).end("<p>Page</p>");
+  });
+  t.after(() => closeServer(server));
+
+  const result = await scanWithNetwork(`http://example.com:${port}/`, {}, network());
+  const redirectUrl = `http://example.com:${port}/redirect`;
+  const redirectFindings = result.findings.filter((finding) => finding.url === redirectUrl);
+  const redirectCheck = result.linkChecks.find((check) => check.url === redirectUrl);
+
+  assert.deepEqual(requests, ["/", "/redirect", "/works", "/gone"]);
+  assert.equal(redirectFindings.length, 1);
+  assert.equal(redirectFindings[0]?.type, "unverified-internal-link");
+  assert.equal(redirectFindings[0]?.status, "unverified");
+  assert.equal(redirectFindings[0]?.severity, "warning");
+  assert.equal(redirectFindings[0]?.evidence.reason, "cross-origin-redirect-blocked");
+  assert.equal(redirectCheck?.status, "unverified");
+  assert.equal(redirectCheck?.reason, "cross-origin-redirect-blocked");
+  assert.equal(result.findings.some((finding) =>
+    finding.url === redirectUrl && (finding.type === "http-error" || finding.type === "broken-internal-link")), false);
+  assert.equal(result.linkChecks.find((check) => check.url.endsWith("/works"))?.status, "passed");
+  assert.equal(result.linkChecks.find((check) => check.url.endsWith("/gone"))?.status, "failed");
+  assert.ok(result.findings.some((finding) =>
+    finding.url.endsWith("/gone") && finding.type === "broken-internal-link" && finding.status === "failed"));
 });
 
 test("bounds concurrent resource checks and blocks private resource destinations", async (t) => {
@@ -271,6 +312,8 @@ test("reports crawled page network failures and timeouts as http-error findings"
   assert.match(disconnected?.evidence.error ?? "", /socket hang up|reset/i);
   assert.equal(timedOut?.evidence.statusCode, undefined);
   assert.match(timedOut?.evidence.error ?? "", /Request timed out after 25 ms/);
+  assert.equal(result.linkChecks.find((check) => check.url === disconnectedUrl)?.status, "failed");
+  assert.equal(result.linkChecks.find((check) => check.url === timeoutUrl)?.status, "failed");
 });
 
 test("marks resource checks incomplete when the target safety limit truncates them", async (t) => {

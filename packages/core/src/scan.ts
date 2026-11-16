@@ -3,7 +3,7 @@ import { loadPage, ResponseSizeLimitError } from "./crawler/http.js";
 import { boundedInteger, resolvePublicAddresses } from "./crawler/url-safety.js";
 import type { CrawlOptions, CrawlPage, CrawlResult, CrawlerNetworkForTests } from "./crawler/types.js";
 import type { ResourceType } from "./crawler/html.js";
-import type { Finding, FindingEvidence, FindingType } from "./finding.js";
+import type { Finding, FindingEvidence, FindingStatus, FindingType, LinkCheck, LinkCheckStatus } from "./finding.js";
 
 const DEFAULT_CONCURRENCY = 4;
 const MAX_CONCURRENCY = 32;
@@ -17,6 +17,7 @@ export interface ScanOptions extends CrawlOptions {
 
 export interface ScanResult extends CrawlResult {
   findings: Finding[];
+  linkChecks: LinkCheck[];
   resourceChecksTruncated: boolean;
 }
 
@@ -29,6 +30,7 @@ interface TargetUse {
 interface CheckResult {
   statusCode?: number;
   error?: string;
+  errorCode?: CrawlPage["errorCode"];
 }
 
 export async function scan(url: string, options: ScanOptions = {}): Promise<ScanResult> {
@@ -76,8 +78,10 @@ export async function scanWithNetwork(
   }
 
   const findings: Finding[] = [];
+  const linkChecks: LinkCheck[] = [];
   const httpErrorUrls = new Set<string>();
   for (const page of crawl.pages) {
+    if (page.errorCode === "cross-origin-redirect-blocked") continue;
     if ((page.statusCode !== undefined && page.statusCode >= 400) ||
       (page.statusCode === undefined && page.error !== undefined)) {
       const pageUrl = page.finalUrl ?? page.url;
@@ -106,14 +110,36 @@ export async function scanWithNetwork(
       ...(result.statusCode === undefined ? {} : { statusCode: result.statusCode }),
       sourceUrls,
       ...(result.error === undefined ? {} : { error: result.error }),
+      ...(result.errorCode === undefined ? {} : { reason: result.errorCode }),
     };
+
+    if (target.internalLinkSources.size > 0) {
+      const status = linkCheckStatus(result);
+      linkChecks.push({
+        url: target.url,
+        sourceUrls: [...target.internalLinkSources].sort(),
+        status,
+        ...(result.errorCode === undefined ? {} : { reason: result.errorCode }),
+        ...(result.statusCode === undefined ? {} : { statusCode: result.statusCode }),
+        ...(result.error === undefined ? {} : { error: result.error }),
+      });
+      if (status === "unverified") {
+        findings.push(createFinding(
+          "unverified-internal-link",
+          target.url,
+          "This internal link was not verified because the crawler blocked a cross-origin redirect.",
+          { ...evidence, reason: "cross-origin-redirect-blocked" },
+          "unverified",
+        ));
+      }
+    }
 
     if (result.statusCode !== undefined && result.statusCode >= 400 && !httpErrorUrls.has(target.url)) {
       findings.push(createFinding("http-error", target.url, `Received HTTP ${result.statusCode}.`, evidence));
       httpErrorUrls.add(target.url);
     }
     if (!failed) continue;
-    if (target.internalLinkSources.size > 0) {
+    if (target.internalLinkSources.size > 0 && result.errorCode !== "cross-origin-redirect-blocked") {
       findings.push(createFinding(
         "broken-internal-link",
         target.url,
@@ -124,6 +150,7 @@ export async function scanWithNetwork(
       ));
     }
     for (const [resourceType, sources] of target.resourceSources) {
+      if (result.errorCode === "cross-origin-redirect-blocked") continue;
       const type = findingTypeForResource(resourceType);
       findings.push(createFinding(
         type,
@@ -137,7 +164,8 @@ export async function scanWithNetwork(
   }
 
   findings.sort(compareFindings);
-  return { ...crawl, findings, resourceChecksTruncated: truncated };
+  linkChecks.sort((left, right) => compareStrings(left.url, right.url));
+  return { ...crawl, findings, linkChecks, resourceChecksTruncated: truncated };
 }
 
 function collectTargets(pages: CrawlPage[], targetLimit: number): { targets: Map<string, TargetUse>; truncated: boolean } {
@@ -180,6 +208,7 @@ function collectCrawlResults(pages: CrawlPage[]): Map<string, CheckResult> {
     const result = {
       ...(page.statusCode === undefined ? {} : { statusCode: page.statusCode }),
       ...(page.error === undefined ? {} : { error: page.error }),
+      ...(page.errorCode === undefined ? {} : { errorCode: page.errorCode }),
     };
     results.set(page.url, result);
     if (page.finalUrl !== undefined && !results.has(page.finalUrl)) results.set(page.finalUrl, result);
@@ -203,8 +232,28 @@ function resourceLabel(type: ResourceType): string {
   }
 }
 
-function createFinding(type: FindingType, url: string, message: string, evidence: FindingEvidence): Finding {
-  return { id: `${type}:${encodeURIComponent(url)}`, type, severity: "error", url, message, evidence };
+function createFinding(
+  type: FindingType,
+  url: string,
+  message: string,
+  evidence: FindingEvidence,
+  status: FindingStatus = "failed",
+): Finding {
+  return {
+    id: `${type}:${encodeURIComponent(url)}`,
+    type,
+    severity: status === "failed" ? "error" : "warning",
+    status,
+    url,
+    message,
+    evidence,
+  };
+}
+
+function linkCheckStatus(result: CheckResult): LinkCheckStatus {
+  if (result.errorCode === "cross-origin-redirect-blocked") return "unverified";
+  if (result.error !== undefined || result.statusCode === undefined) return "failed";
+  return result.statusCode >= 200 && result.statusCode < 400 ? "passed" : "failed";
 }
 
 async function mapConcurrent<T, R>(items: T[], concurrency: number, task: (item: T) => Promise<R>): Promise<R[]> {
