@@ -1,5 +1,5 @@
 import { extractPageReferences, resolveBaseUrl, resolveCrawlLink } from "./crawler/html.js";
-import { headerValue, loadPage, ResponseSizeLimitError } from "./crawler/http.js";
+import { CrossOriginRedirectBlockedError, headerValue, loadPage, ResponseSizeLimitError } from "./crawler/http.js";
 import { boundedInteger, normalizeCrawlUrl, resolveAndValidate, resolvePublicAddresses } from "./crawler/url-safety.js";
 import type { CrawlLimits, CrawlOptions, CrawlPage, CrawlResult, CrawlStats, CrawlerNetworkForTests } from "./crawler/types.js";
 
@@ -72,6 +72,7 @@ export async function crawlWithNetwork(
         internalLinks: [],
         resources: [],
         ...(error instanceof ResponseSizeLimitError ? { statusCode: error.statusCode } : {}),
+        ...(error instanceof CrossOriginRedirectBlockedError ? { errorCode: error.code } : {}),
         error: errorMessage(error),
       });
     }

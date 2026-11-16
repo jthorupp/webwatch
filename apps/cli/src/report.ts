@@ -1,4 +1,4 @@
-import type { CrawlPage, CrawlStats, Finding, FindingEvidence, ScanResult } from "@webwatch/core";
+import type { CrawlPage, CrawlStats, Finding, FindingEvidence, LinkCheck, ScanResult } from "@webwatch/core";
 
 export function isScanIncomplete(result: ScanResult): boolean {
   return result.stats.pagesFailed > 0 ||
@@ -9,7 +9,7 @@ export function isScanIncomplete(result: ScanResult): boolean {
 }
 
 export function getScanExitCode(result: ScanResult): 0 | 1 | 2 {
-  if (result.findings.some((finding) => finding.severity === "error")) return 1;
+  if (result.findings.some((finding) => finding.status === "failed" && finding.severity === "error")) return 1;
   if (isScanIncomplete(result)) return 2;
   return 0;
 }
@@ -22,7 +22,7 @@ export type CompletenessReason =
   | { type: "resource-checks-truncated" };
 
 type JsonScanPage = Pick<CrawlPage, "url" | "links" | "internalLinks" | "resources"> &
-  Partial<Pick<CrawlPage, "finalUrl" | "statusCode" | "contentType" | "error">>;
+  Partial<Pick<CrawlPage, "finalUrl" | "statusCode" | "contentType" | "error" | "errorCode">>;
 
 type JsonScanStats = Pick<CrawlStats,
   | "pagesVisited"
@@ -39,9 +39,13 @@ type JsonScanStats = Pick<CrawlStats,
   | "durationMs"
 >;
 
-type JsonFinding = Pick<Finding, "id" | "type" | "severity" | "url" | "message"> & {
-  evidence: Pick<FindingEvidence, "sourceUrls"> & Partial<Pick<FindingEvidence, "statusCode" | "error">>;
+type JsonFinding = Pick<Finding, "id" | "type" | "severity" | "status" | "url" | "message"> & {
+  evidence: Pick<FindingEvidence, "sourceUrls"> &
+    Partial<Pick<FindingEvidence, "statusCode" | "error" | "reason">>;
 };
+
+type JsonLinkCheck = Pick<LinkCheck, "url" | "sourceUrls" | "status"> &
+  Partial<Pick<LinkCheck, "reason" | "statusCode" | "error">>;
 
 export interface JsonScanResult {
   startUrl: string;
@@ -49,6 +53,7 @@ export interface JsonScanResult {
   pages: JsonScanPage[];
   stats: JsonScanStats;
   findings: JsonFinding[];
+  linkChecks: JsonLinkCheck[];
   resourceChecksTruncated: boolean;
   completeness: {
     isComplete: boolean;
@@ -74,6 +79,7 @@ export function formatScanJson(result: ScanResult): string {
       ...(page.finalUrl === undefined ? {} : { finalUrl: page.finalUrl }),
       ...(page.statusCode === undefined ? {} : { statusCode: page.statusCode }),
       ...(page.contentType === undefined ? {} : { contentType: page.contentType }),
+      ...(page.errorCode === undefined ? {} : { errorCode: page.errorCode }),
       links: [...page.links],
       internalLinks: [...page.internalLinks],
       resources: page.resources.map((resource) => ({ type: resource.type, url: resource.url })),
@@ -97,13 +103,23 @@ export function formatScanJson(result: ScanResult): string {
       id: finding.id,
       type: finding.type,
       severity: finding.severity,
+      status: finding.status,
       url: finding.url,
       message: finding.message,
       evidence: {
         ...(finding.evidence.statusCode === undefined ? {} : { statusCode: finding.evidence.statusCode }),
         sourceUrls: [...finding.evidence.sourceUrls],
         ...(finding.evidence.error === undefined ? {} : { error: finding.evidence.error }),
+        ...(finding.evidence.reason === undefined ? {} : { reason: finding.evidence.reason }),
       },
+    })),
+    linkChecks: result.linkChecks.map((check) => ({
+      url: check.url,
+      sourceUrls: [...check.sourceUrls],
+      status: check.status,
+      ...(check.reason === undefined ? {} : { reason: check.reason }),
+      ...(check.statusCode === undefined ? {} : { statusCode: check.statusCode }),
+      ...(check.error === undefined ? {} : { error: check.error }),
     })),
     resourceChecksTruncated: result.resourceChecksTruncated,
     completeness: { isComplete: reasons.length === 0, reasons },
@@ -113,16 +129,20 @@ export function formatScanJson(result: ScanResult): string {
 
 export function formatScanReport(result: ScanResult): string {
   const incomplete = isScanIncomplete(result);
-  const hasFindings = result.findings.length > 0;
-  const state = hasFindings
+  const hasFailedFindings = result.findings.some((finding) => finding.status === "failed");
+  const hasUnverifiedFindings = result.findings.some((finding) => finding.status === "unverified");
+  const state = hasFailedFindings
     ? `FINDINGS${incomplete ? " (INCOMPLETE)" : ""}`
-    : incomplete
-      ? "INCOMPLETE"
-      : "CLEAN";
+    : hasUnverifiedFindings
+      ? `UNVERIFIED${incomplete ? " (INCOMPLETE)" : ""}`
+      : incomplete
+        ? "INCOMPLETE"
+        : "CLEAN";
   const lines = [
     `WebWatch scan: ${result.startUrl}`,
     `Result: ${state}`,
     `Pages: ${result.stats.pagesVisited} visited (${result.stats.pagesSucceeded} succeeded, ${result.stats.pagesFailed} failed); ${result.stats.uniqueUrlsDiscovered} discovered`,
+    `Links: ${countLinkChecks(result.linkChecks, "passed")} passed, ${countLinkChecks(result.linkChecks, "failed")} failed, ${countLinkChecks(result.linkChecks, "unverified")} unverified`,
     `Redirects followed: ${result.stats.redirectsFollowed}`,
     `Findings: ${result.findings.length}`,
   ];
@@ -146,7 +166,7 @@ export function formatScanReport(result: ScanResult): string {
     }
   }
 
-  if (hasFindings) {
+  if (result.findings.length > 0) {
     lines.push("Findings by severity and type:");
     for (const group of groupFindings(result.findings)) {
       lines.push(`${group.severity.toUpperCase()} / ${group.type} (${group.findings.length})`);
@@ -158,6 +178,10 @@ export function formatScanReport(result: ScanResult): string {
   }
 
   return lines.join("\n");
+}
+
+function countLinkChecks(linkChecks: LinkCheck[], status: LinkCheck["status"]): number {
+  return linkChecks.filter((check) => check.status === status).length;
 }
 
 interface FindingGroup {

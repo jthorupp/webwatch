@@ -12,6 +12,7 @@ export interface CrawlPage {
   finalUrl?: string;
   statusCode?: number;
   contentType?: string;
+  errorCode?: "cross-origin-redirect-blocked";
   links: string[];
   internalLinks: string[];
   resources: Array<{ type: ResourceType; url: string }>;

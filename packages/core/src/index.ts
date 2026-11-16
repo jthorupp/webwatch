@@ -4,7 +4,16 @@ export { crawl, isPublicIpAddress } from "./crawler.js";
 export type { CrawlOptions, CrawlPage, CrawlResult, CrawlStats } from "./crawler.js";
 export { scan } from "./scan.js";
 export type { ScanOptions, ScanResult } from "./scan.js";
-export type { Finding, FindingEvidence, FindingSeverity, FindingType } from "./finding.js";
+export type {
+  Finding,
+  FindingEvidence,
+  FindingSeverity,
+  FindingStatus,
+  FindingType,
+  LinkCheck,
+  LinkCheckReason,
+  LinkCheckStatus,
+} from "./finding.js";
 
 export type WebWatchCommand =
   | { name: "help" }
